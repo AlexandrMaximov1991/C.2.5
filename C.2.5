@@ -1,0 +1,297 @@
+from random import randint
+
+
+# создаем общий клас исключений
+class BoardException(Exception):
+    pass
+
+
+# создаем класс исключающий ход за пределы игрового поля
+class BoardOutException(BoardException):
+    def __str__(self):
+        return f"ОГО! Что-то Вы далеко выстрелили,\nпопробуйте стрелять в пределах коордитнат 'x' и 'y'"
+
+
+# создаем класс исключающий попадание в одно и тоже место повторно
+class BoardUsedException(BoardException):
+    def __str__(self):
+        return f"Вы уже стреляли в это место,\nпопробуйте еще раз!"
+
+
+# создаем класс позволяющий создавать правильно корабли
+class BoardWrongShipException(BoardException):
+    pass
+
+
+# создаем класс отвечающий за хранение точек координат и сравнивает точки координат
+class Dot:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __eq__(self, other):
+        return self.x == other.x and self.y == other.y
+
+    def __repr__(self):
+        return f"Dot({self.x}, {self.y})"
+
+
+# класс создающий корабли по длине и расположению
+class Ship:
+    def __init__(self, bow, p, o):
+        self.bow = bow
+        self.p = p
+        self.o = o
+        self.lives = p
+
+    @property
+    def dots(self):
+        ship_dots = []
+        for i in range(self.p):
+            cur_x = self.bow.x
+            cur_y = self.bow.y
+
+            if self.o == 0:
+                cur_x += i
+
+            elif self.o == 1:
+                cur_y += i
+
+            ship_dots.append(Dot(cur_x, cur_y))
+
+        return ship_dots
+
+    # метод отвечающий за поподание в корабль
+    def shooting(self, shot):
+        return shot in self.dots
+
+
+# класс отображающий на экран игровую доску
+class Board:
+    # метод определяет параметры игровой доски
+    def __init__(self, hid=False, size=6):
+        self.size = size
+        self.hid = hid
+        self.count = 0
+        self.field = [[" "] * size for _ in range(size)]
+        self.busy = []
+        self.ships = []
+
+    # метод отображающий игровую доску
+    def __str__(self):
+        res = ""
+        res += "  | 1 | 2 | 3 | 4 | 5 | 6 |"
+        for i, row in enumerate(self.field):
+            res += f"\n{i + 1} | " + " | ".join(row) + " |"
+
+        if self.hid:
+            res = res.replace("■", " ")
+        return res
+
+    # метод проверяющий правильность координат
+    def out(self, d):
+        return not ((0 <= d.x < self.size) and (0 <= d.y < self.size))
+
+    # метод позволяющий видеть координаты вокруг пораженного коробля
+    def contour(self, ship, verb=False):
+        near = [
+            (-1, -1), (-1, 0), (-1, 1),
+            (0, -1), (0, 0), (0, 1),
+            (1, -1), (1, 0), (1, 1)
+        ]
+        for d in ship.dots:
+            for dx, dy in near:
+                cur = Dot(d.x + dx, d.y + dy)
+                if not (self.out(cur)) and cur not in self.busy:
+                    if verb:
+                        self.field[cur.x][cur.y] = "."
+                    self.busy.append(cur)
+
+    # метод расставляющий корабли на доску
+    def add_ship(self, ship):
+        for d in ship.dots:
+            if self.out(d) or d in self.busy:
+                raise BoardWrongShipException()
+        for d in ship.dots:
+            self.field[d.x][d.y] = "■"
+            self.busy.append(d)
+        self.ships.append(ship)
+        self.contour(ship)
+
+    # метод проверяющий координаты выстрела
+    def shot(self, d):
+        if self.out(d):
+            raise BoardOutException()
+
+        if d in self.busy:
+            raise BoardUsedException()
+
+        self.busy.append(d)
+
+        for ship in self.ships:
+            if ship.shooting(d):
+                ship.lives -= 1
+                self.field[d.x][d.y] = "Х"
+                if ship.lives == 0:
+                    self.count += 1
+                    self.contour(ship, verb=True)
+                    print("Корабль уничтожен!")
+                    return False
+                else:
+                    print("Корабль ранен!")
+                    return True
+
+        self.field[d.x][d.y] = "."
+        print(" Мимо! В следующий раз обязательно попадете!")
+        return False
+
+    def begin(self):
+        self.busy = []
+
+    def defeat(self):
+        return self.count == len(self.ships)
+
+
+# класс хода игрока
+class Player:
+    def __init__(self, board, enemy):
+        self.board = board
+        self.enemy = enemy
+
+    def ask(self):
+        raise NotImplementedError()
+
+    def move(self):
+        while True:
+            try:
+                target = self.ask()
+                repeat = self.enemy.shot(target)
+                return repeat
+            except BoardException as e:
+                print(e)
+
+
+# класс определяющий случайную точку хода компьютера
+class AI(Player):
+    def ask(self):
+        d = Dot(randint(0, 5), randint(0, 5))
+        print(f"Ход Искусственного Интеллекта: {d.x + 1} {d.y + 1}")
+        return d
+
+
+# класс хода
+class User(Player):
+    # метод запрашивает координаты хода
+    def ask(self):
+        while True:
+            cords = input("Куда будем стрелять? ").split()
+            # проверка на ввод правильного колличества координат
+            if len(cords) != 2:
+                print(" Введите 2 координаты! ")
+                continue
+
+            x, y = cords
+            # метод проверяющий чтобы в координатах были числа, а не инные символы
+            if not (x.isdigit()) or not (y.isdigit()):
+                print(f" Правильно вводить числа,\nпо другому работать игра не будет! ")
+                continue
+
+            x, y = int(x), int(y)
+
+            return Dot(x - 1, y - 1)
+
+
+# класс игрового цикла
+class Game:
+    # метод выводит на экран приветствие и правила игры
+    @staticmethod
+    def greetings():
+        print(f"-------------------\n  Приветсвуем вас  \n"
+              f"      в игре       \n    морской бой    "
+              f"\n-------------------\n     В этом бою    "
+              f"\n  сразится человек \n     против ИИ     "
+              f"\n-------------------\n формат ввода: x y "
+              f"\n x - номер строки  \n y - номер столбца ")
+
+    # метод определяющий где чья доска, а также не позволяет нам видеть доску компьютера
+    def __init__(self, size=6):
+        self.size = size
+        pl = self.random_board()
+        co = self.random_board()
+        co.hid = True
+
+        self.ai = AI(co, pl)
+        self.us = User(pl, co)
+
+    # метод выводящий на экран игровые доски
+    def print_boards(self):
+        print("-" * 20)
+        print("         Ваша доска:        ")
+        print(self.us.board)
+        print("-" * 25)
+        print("Доска Искусственного Интеллекта:")
+        print(self.ai.board)
+        print("-" * 25)
+
+    # метод хранящий в себе колличество и размеры расставляемых кораблей
+    def try_board(self):
+        lens = [3, 2, 2, 1, 1, 1, 1]
+        board = Board(size=self.size)
+        attempts = 0
+        for k in lens:
+            while True:
+                attempts += 1
+                if attempts > 2000:
+                    return None
+                ship = Ship(Dot(randint(0, self.size), randint(0, self.size)), k, randint(0, 1))
+                try:
+                    board.add_ship(ship)
+                    break
+                except BoardWrongShipException:
+                    pass
+        board.begin()
+        return board
+
+    # метод генерации случайных досок игрового поля
+    def random_board(self):
+        board = None
+        while board is None:
+            board = self.try_board()
+        return board
+
+    # метод отвечающий за принадлежность хода, а так же за определение победителя
+    def loop(self):
+        num = 0
+        while True:
+            self.print_boards()
+            if num % 2 != 0:
+                print("Ваш ход")
+                repeat = self.us.move()
+            else:
+                print("Ходит Искусственный Интеллект!")
+                repeat = self.ai.move()
+            if repeat:
+                num -= 1
+
+            if self.ai.board.defeat():
+                self.print_boards()
+                print("-" * 20)
+                print("Вы Победили Искусственный Интеллект!")
+                break
+
+            if self.us.board.defeat():
+                self.print_boards()
+                print("-" * 20)
+                print("Искусственный Интеллект выиграл!")
+                break
+            num += 1
+
+    # метод вызывающий приветствие, а затем игровой цикл
+    def start(self):
+        self.greetings()
+        self.loop()
+
+
+g = Game()
+g.start()
+input('Нажмите ENTER для выхода из игры!!!')
